@@ -7,8 +7,8 @@
 // @author niexw
 // @email niexiaowen@uestc.edu.cn
 //
-#ifndef __OCF_UTILS_CHECKSUM_H__
-#define __OCF_UTILS_CHECKSUM_H__
+#ifndef __DB_CHECKSUM_H__
+#define __DB_CHECKSUM_H__
 
 #include "./endian.h"
 
@@ -48,4 +48,4 @@ inline unsigned int checksum32(const unsigned char *buf, int len)
 
 } // namespace db
 
-#endif // __OCF_UTILS_CHECKSUM_H__
+#endif // __DB_CHECKSUM_H__

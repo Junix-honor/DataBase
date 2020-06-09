@@ -25,6 +25,14 @@
 #    else
 #        define DLL_EXPORT __declspec(dllimport)
 #    endif
+
+/* Structure for scatter/gather I/O.  */
+struct iovec
+{
+    void *iov_base; /* Pointer to data.  */
+    size_t iov_len; /* Length of data.  */
+};
+
 #else
 #    define S_OK 0    /* 正常返回 */
 #    define S_FALSE 1 /* 异常返回 */

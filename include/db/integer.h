@@ -6,12 +6,11 @@
 // @author niexw
 // @email niexiaowen@uestc.edu.cn
 //
-#ifndef __OCF_UTILS_INTEGER_H__
-#define __OCF_UTILS_INTEGER_H__
+#ifndef __DB_INTEGER_H__
+#define __DB_INTEGER_H__
 
 #include <string.h>
 #include "./endian.h"
-
 
 namespace db {
 
@@ -58,4 +57,4 @@ class Integer
 
 } // namespace db
 
-#endif // __OCF_UTILS_INTEGER_H__
+#endif // __DB_INTEGER_H__

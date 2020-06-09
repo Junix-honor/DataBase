@@ -1,103 +1,94 @@
-/*
- * Filename: d:\Workspace\DataBase\db\src\file.cc
- * Path: d:\Workspace\DataBase\db\src
- * Created Date: Saturday, March 28th 2020, 10:49:23 am
- * Author: Honor
- *
- * Copyright (c) 2020 Your Company
- */
-
+////
+// @file file.cc
+// @brief
+// 实现文件功能
+//
+// @author niexw
+// @email niexiaowen@uestc.edu.cn
+//
 #include <db/file.h>
 
 namespace db {
-//转化为宽字节
-LPCWSTR stringToLPCWSTR(std::string orig)
-{
-    size_t origsize = orig.length() + 1;
-    const size_t newsize = 100;
-    size_t convertedChars = 0;
-    wchar_t *wcstring =
-        (wchar_t *) malloc(sizeof(wchar_t) * (orig.length() - 1));
-    mbstowcs_s(&convertedChars, wcstring, origsize, orig.c_str(), _TRUNCATE);
-    return wcstring;
-}
-//写文件
-void Write(char *buffer, DWORD contentLen)
-{
-    HANDLE pFile;
-    char *tmpBuf;
-    DWORD dwBytesWrite, dwBytesToWrite;
 
-    pFile = CreateFile(
-        stringToLPCWSTR(filePath),
-        GENERIC_WRITE,
-        0,
-        NULL,
-        CREATE_ALWAYS, //总是创建文件
-        FILE_ATTRIBUTE_NORMAL,
+int File::open(const char *path)
+{
+    // https://docs.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-createfilea
+    // TODO:
+    // 1. path修改成unicode，CreateFile
+    // 2. buffer、overlap？
+    //
+    handle_ = ::CreateFileA(
+        path,                               // 路径
+        GENERIC_READ | GENERIC_WRITE,       // 访问权限
+        FILE_SHARE_READ | FILE_SHARE_WRITE, // 与其它进程共享读写
+        NULL,                               // 安全属性
+        OPEN_ALWAYS,           // 打开已有文件，不存在文件则创建
+        FILE_ATTRIBUTE_NORMAL, // 普通文件
         NULL);
-
-    if (pFile == INVALID_HANDLE_VALUE) {
-        printf("create file error!\n");
-        CloseHandle(pFile);
-    }
-
-    dwBytesToWrite = contentLen;
-    dwBytesWrite = 0;
-
-    tmpBuf = buffer;
-
-    do { //循环写文件，确保完整的文件被写入
-
-        WriteFile(pFile, tmpBuf, dwBytesToWrite, &dwBytesWrite, NULL);
-
-        dwBytesToWrite -= dwBytesWrite;
-        tmpBuf += dwBytesWrite;
-
-    } while (dwBytesToWrite > 0);
-
-    CloseHandle(pFile);
+    return handle_ == INVALID_HANDLE_VALUE ? ::GetLastError() : S_OK;
 }
-//读文件
-char *Read()
+
+void File::close()
 {
-    HANDLE pFile;
-    DWORD fileSize;
-    char *buffer, *tmpBuf;
-    DWORD dwBytesRead, dwBytesToRead, tmpLen;
-
-    pFile = CreateFile(
-        stringToLPCWSTR(filePath),
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        NULL,
-        OPEN_EXISTING, //打开已存在的文件
-        FILE_ATTRIBUTE_NORMAL,
-        NULL);
-
-    if (pFile == INVALID_HANDLE_VALUE) {
-        printf("open file error!\n");
-        CloseHandle(pFile);
-        return NULL;
+    if (handle_ != INVALID_HANDLE_VALUE) {
+        ::CloseHandle(handle_);
+        handle_ = INVALID_HANDLE_VALUE;
     }
-
-    fileSize = GetFileSize(pFile, NULL); //得到文件的大小
-
-    buffer = (char *) malloc(fileSize);
-    ZeroMemory(buffer, fileSize);
-    dwBytesToRead = fileSize;
-    dwBytesRead = 0;
-    tmpBuf = buffer;
-
-    do { //循环读文件，确保读出完整的文件
-        ReadFile(pFile, tmpBuf, dwBytesToRead, &dwBytesRead, NULL);
-        if (dwBytesRead == 0) break;
-        dwBytesToRead -= dwBytesRead;
-        tmpBuf += dwBytesRead;
-    } while (dwBytesToRead > 0);
-
-    free(buffer);
-    CloseHandle(pFile);
-    return buffer;
 }
+
+int File::read(unsigned long long offset, char *buffer, size_t length)
+{
+    // https://docs.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-readfile
+    DWORD len = 0; // 读长度
+    OVERLAPPED over = {};
+    over.Offset = (DWORD) offset;
+    over.OffsetHigh = offset >> 32;
+    bool ret = ::ReadFile(
+        handle_,         // 文件句柄
+        (LPVOID) buffer, // 读buffer
+        (DWORD) length,  // buffer大小
+        &len,            // 读长度
+        &over);          // 偏移量
+    return ret ? S_OK : ::GetLastError();
+    // TODO: len == length??
+}
+
+int File::write(unsigned long long offset, const char *buffer, size_t length)
+{
+    // https://docs.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-writefile
+    DWORD len = 0; // 写长度
+    OVERLAPPED over = {};
+    over.Offset = (DWORD) offset;
+    over.OffsetHigh = offset >> 32;
+    bool ret = ::WriteFile(
+        handle_,        // 文件句柄
+        buffer,         // 写buffer
+        (DWORD) length, // buffer长度
+        &len,           // 写长度返回值
+        &over);         // 设定偏移量
+    return ret ? S_OK : ::GetLastError();
+    // TODO: len == length??
+}
+
+int File::remove(const char *path)
+{
+    // TODO: DeleteFile
+    // https://docs.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-deletefilea
+    bool ret = ::DeleteFileA(path);
+    return ret ? S_OK : ::GetLastError();
+}
+
+int File::length(unsigned long long &len)
+{
+    // https://docs.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-getfilesizeex
+    LARGE_INTEGER size;
+    bool ret = ::GetFileSizeEx(handle_, &size);
+    if (!ret)
+        return ::GetLastError();
+    else {
+        len = size.QuadPart;
+        return S_OK;
+    }
+}
+
 } // namespace db

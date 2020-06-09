@@ -20,51 +20,64 @@
 // @author niexw
 // @email niexiaowen@uestc.edu.cn
 //
-#ifndef __OCF_DB_RECORD_H__
-#define __OCF_DB_RECORD_H__
+#ifndef __DB_RECORD_H__
+#define __DB_RECORD_H__
 
 #include <utility>
+#include "./config.h"
 #include "./integer.h"
-#include "./field.h"
-
-/* Structure for scatter/gather I/O.  */
-struct iovec
-{
-    void *iov_base; /* Pointer to data.  */
-    size_t iov_len; /* Length of data.  */
-};
 
 namespace db {
 
 // 物理记录
-class Record : public Field
+// TODO: 长度超越一个block？
+class Record
 {
   public:
     static const int HEADER_SIZE = 1; // 头部1B
-    static const int ALIGN_SIZE = 4;  // 按4B对齐
+    static const int ALIGN_SIZE = 8;  // 按8B对齐
 
     static const int BYTE_TOMBSTONE = 1; // tombstone在header的第1字节
     static const unsigned char MASK_TOMBSTONE = 0x80; // tombstone掩码
     static const int BYTE_MIMIMUM = 1; // 最小记录标记在header的第1字节
     static const unsigned char MASK_MINIMUM = 0x40; // 最小记录掩码
 
-  public:
-    // 整个记录长度+header偏移量
-    std::pair<size_t, size_t> size(const iovec *iov, int iovcnt);
+  private:
+    unsigned char *buffer_; // 记录buffer
+    unsigned short length_; // buffer长度
 
-    // 向buffer里写各个域
-    bool set(const iovec *iov, int iovcnt, const unsigned char *header);
+  public:
+    Record()
+        : buffer_(NULL)
+        , length_(0)
+    {}
+
+    // 关联buffer
+    inline void attach(unsigned char *buffer, unsigned short length)
+    {
+        buffer_ = buffer;
+        length_ = length;
+    }
+    // 整个记录长度+header偏移量
+    static std::pair<size_t, size_t> size(const iovec *iov, int iovcnt);
+
+    // 向buffer里写各个域，返回按照对齐后的长度
+    size_t set(const iovec *iov, int iovcnt, const unsigned char *header);
     // 从buffer获取各字段
     bool get(iovec *iov, int iovcnt, unsigned char *header);
+    // 从buffer引用各字段
+    bool ref(iovec *iov, int iovcnt, unsigned char *header);
+    // 从buffer引用特定字段
+    bool specialRef(iovec &iov,unsigned short id);
     // TODO:
     void dump(char *buf, size_t len);
 
     // 获得记录总长度，包含头部+变长偏移数组+长度+记录
-    size_t length(size_t offset);
+    size_t length();
     // 获取记录字段个数
-    size_t fields(size_t offset);
+    size_t fields();
 };
 
 } // namespace db
 
-#endif // __OCF_DB_RECORD_H__
+#endif // __DB_RECORD_H__

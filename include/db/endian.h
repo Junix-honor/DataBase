@@ -11,8 +11,8 @@
 // example on how to get the endian conversion functions on different
 // platforms.
 
-#ifndef PORTABLE_ENDIAN_H__
-#define PORTABLE_ENDIAN_H__
+#ifndef __DB_ENDIAN_H__
+#define __DB_ENDIAN_H__
 
 #if (defined(_WIN16) || defined(_WIN32) || defined(_WIN64)) &&                 \
     !defined(__WINDOWS__)
@@ -68,6 +68,7 @@
 
 #elif defined(__WINDOWS__)
 
+#    include "./config.h"
 #    include <winsock2.h>
 #    pragma comment(lib, "ws2_32.lib")
 
