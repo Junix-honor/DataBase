@@ -68,7 +68,7 @@ class Record
     // 从buffer引用各字段
     bool ref(iovec *iov, int iovcnt, unsigned char *header);
     // 从buffer引用特定字段
-    bool specialRef(iovec &iov,unsigned short id);
+    bool specialRef(iovec &iov,unsigned int id);
     // TODO:
     void dump(char *buf, size_t len);
 

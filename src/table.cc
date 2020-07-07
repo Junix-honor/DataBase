@@ -9,7 +9,11 @@
 #include <db/table.h>
 namespace db {
 
-Table::Table() { buffer_ = (unsigned char *) malloc(Block::BLOCK_SIZE); }
+Table::Table()
+    : relationInfo(NULL)
+{
+    buffer_ = (unsigned char *) malloc(Block::BLOCK_SIZE);
+}
 Table::~Table() { free(buffer_); }
 
 int Table::create(const char *name, RelationInfo &info)
@@ -22,25 +26,26 @@ int Table::open(const char *name)
     std::pair<Schema::TableSpace::iterator, bool> bret = gschema.lookup(name);
     if (!bret.second) return EINVAL;
     // 找到后，加载meta信息
-    it = bret.first;
-    gschema.load(it);
+    gschema.load(bret.first);
+    relationInfo = &bret.first->second;
     return S_OK;
 }
-void Table::close(const char *name) { it->second.file.close(); }
-int Table::destroy(const char *name) { return it->second.file.remove(name); }
+void Table::close(const char *name) { relationInfo->file.close(); }
+int Table::destroy(const char *name) { return relationInfo->file.remove(name); }
 int Table::initial()
 {
     unsigned long long length;
-    int ret = it->second.file.length(length);
+    int ret = relationInfo->file.length(length);
     if (ret) return ret;
     // 加载
     if (length) {
-        it->second.file.read(0, (char *) buffer_, Block::BLOCK_SIZE);
+        relationInfo->file.read(0, (char *) buffer_, Block::BLOCK_SIZE);
         Root root;
         root.attach(buffer_);
         unsigned int first = root.getHead();
+        DataBlockCnt = root.getCnt();
         size_t offset = (first - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
-        it->second.file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
+        relationInfo->file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
     } else {
         Root root;
         unsigned char rb[Root::ROOT_SIZE];
@@ -51,12 +56,28 @@ int Table::initial()
         DataBlock block;
         block.attach(buffer_);
         block.clear(1);
-        block.setNextid(-1); //?unsigned int?
+        block.setNextid(-1);
+        DataBlockCnt = 1;
         // 写root和block
-        it->second.file.write(0, (const char *) rb, Root::ROOT_SIZE);
-        it->second.file.write(
+        relationInfo->file.write(0, (const char *) rb, Root::ROOT_SIZE);
+        relationInfo->file.write(
             Root::ROOT_SIZE, (const char *) buffer_, Block::BLOCK_SIZE);
     }
+    return S_OK;
+}
+int Table::creatDataBlock(int blockid)
+{
+    DataBlock block;
+    size_t offset = (blockid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
+    relationInfo->file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
+    block.attach(buffer_);
+    int nextid = block.getNextid();
+    block.setNextid(++DataBlockCnt);
+
+    block.clear(DataBlockCnt);
+    block.setNextid(nextid);
+    int ret = writeBlock();
+    if (ret) return ret;
     return S_OK;
 }
 int Table::openNextBlock()
@@ -69,12 +90,12 @@ int Table::openNextBlock()
     int currid = block.blockid();   //目前的blockid
     if (nextid != -1) {
         size_t offset = (nextid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
-        it->second.file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
+        relationInfo->file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
     } else {
         block.clear(currid + 1);
         block.setNextid(-1);
         size_t offset = Root::ROOT_SIZE + currid * Block::BLOCK_SIZE;
-        it->second.file.write(
+        relationInfo->file.write(
             offset, (const char *) buffer_, Block::BLOCK_SIZE);
     }
     return S_OK;
@@ -89,7 +110,7 @@ int Table::openNextBlockE()
     int currid = block.blockid();   //目前的blockid
     if (nextid != -1) {
         size_t offset = (nextid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
-        it->second.file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
+        relationInfo->file.read(offset, (char *) buffer_, Block::BLOCK_SIZE);
     } else
         return S_FALSE;
     return S_OK;
@@ -104,9 +125,9 @@ int Table::writeBlock()
 {
     DataBlock data;
     data.attach(buffer_);
-    unsigned int blockid = data.blockid() - 1;
-    size_t offset = blockid * Block::BLOCK_SIZE + Root::ROOT_SIZE;
-    it->second.file.write(offset, (const char *) buffer_, Block::BLOCK_SIZE);
+    unsigned int blockid = data.blockid();
+    size_t offset = (blockid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
+    relationInfo->file.write(offset, (const char *) buffer_, Block::BLOCK_SIZE);
     return S_OK;
 }
 int Table::insert(const unsigned char *header, struct iovec *record, int iovcnt)
@@ -114,6 +135,23 @@ int Table::insert(const unsigned char *header, struct iovec *record, int iovcnt)
     //打开block
     bool ret = initial();
     if (ret) return ret;
+
+    for (auto bit1 = blockBegin(),bit2=++blockBegin(); bit2 != blockEnd(); ++bit1,++bit2) {
+        DataBlock data = *bit1;
+        iovec keyFront, keyBack;
+        unsigned int key = relationInfo->key;
+        iovec &keyField = record[key];
+        //获取key字段
+        Record rec = *iterator(0, bit1);
+        rec.specialRef(keyFront, key);
+        rec = *iterator(data.getSlotsNum() - 1, bit1);
+        rec.specialRef(keyBack, key);
+        (relationInfo->fields[key].type->compare(keyField.iov_base,keyBack.iov_base,keyField.iov_len,keyBack.iov_len) 
+        &&( data.getFreeLength()
+            ||relationInfo->fields[key].type->compare(keyFront.iov_base,keyField.iov_base,keyFront.iov_len,keyField.iov_len)
+        ))
+             ;
+    }
 
     DataBlock data;
     data.attach(buffer_);
@@ -132,11 +170,11 @@ int Table::insert(const unsigned char *header, struct iovec *record, int iovcnt)
     std::vector<unsigned short> slotsv;
     for (int i = 0; i < data.getSlotsNum(); i++)
         slotsv.push_back(data.getSlot(i));
-    unsigned int key = it->second.key;
-    if (it->second.fields[key].type == NULL)
-        it->second.fields[key].type =
-            findDataType(it->second.fields[key].fieldType.c_str());
-    Compare cmp(it->second.fields[key], key, *this);
+    unsigned int key = relationInfo->key;
+    if (relationInfo->fields[key].type == NULL)
+        relationInfo->fields[key].type =
+            findDataType(relationInfo->fields[key].fieldType.c_str());
+    Compare cmp(relationInfo->fields[key], key, *this);
     std::sort(slotsv.begin(), slotsv.end(), cmp);
     for (int i = 0; i < data.getSlotsNum(); i++)
         data.setSlot(i, slotsv[i]);
@@ -163,15 +201,15 @@ int Table::remove(struct iovec keyField)
         Record blockFront = front();
         Record blockBack = back();
         iovec keyFront, keyBack;
-        unsigned int key = it->second.key;
+        unsigned int key = relationInfo->key;
         blockFront.specialRef(keyFront, key);
         blockBack.specialRef(keyBack, key);
-        if (!it->second.fields[key].type->compare(
+        if (!relationInfo->fields[key].type->compare(
                 keyField.iov_base,
                 keyFront.iov_base,
                 keyField.iov_len,
                 keyFront.iov_len) &&
-            !it->second.fields[key].type->compare(
+            !relationInfo->fields[key].type->compare(
                 keyBack.iov_base,
                 keyField.iov_base,
                 keyBack.iov_len,
@@ -196,14 +234,14 @@ int Table::remove(struct iovec keyField)
     for (auto iter = begin(); iter != end(); ++iter) {
         Record &record = *iter;
         iovec field;
-        unsigned int key = it->second.key;
+        unsigned int key = relationInfo->key;
         record.specialRef(field, key);
-        if (!(it->second.fields[key].type->compare(
+        if (!(relationInfo->fields[key].type->compare(
                 field.iov_base,
                 keyField.iov_base,
                 field.iov_len,
                 keyField.iov_len)) &&
-            !(it->second.fields[key].type->compare(
+            !(relationInfo->fields[key].type->compare(
                 keyField.iov_base,
                 field.iov_base,
                 keyField.iov_len,

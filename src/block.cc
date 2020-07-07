@@ -48,6 +48,8 @@ void Root::clear(unsigned short type)
     TimeStamp ts;
     ts.now();
     setTimeStamp(ts);
+    //设定block数目
+    setCnt(0);
     // 设置checksum
     setChecksum();
 }

@@ -247,7 +247,7 @@ bool Record::ref(iovec *iov, int iovcnt, unsigned char *header)
 
     return true;
 }
-bool Record::specialRef(iovec &iov, unsigned short id)
+bool Record::specialRef(iovec &iov, unsigned int id)
 {
     size_t fieldNum = fields();
     struct iovec *iove = (struct iovec *) malloc(sizeof(iovec) * fieldNum);

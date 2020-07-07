@@ -73,6 +73,10 @@ class Root
         ROOT_HEAD_OFFSET + ROOT_HEAD_SIZE;  // 空闲block链头偏移量
     static const int ROOT_GARBAGE_SIZE = 4; // 空闲block链头大小
 
+    static const int ROOT_BLOCKCNT_OFFSET =
+        ROOT_GARBAGE_OFFSET + ROOT_GARBAGE_SIZE; // Block数目偏移量
+    static const int ROOT_BLOCKCNT_SIZE = 4; // Block数目
+
     static const int ROOT_TRAILER_SIZE = 4; // checksum大小
     static const int ROOT_TRAILER_OFFSET =  // checksum偏移量
         ROOT_SIZE - ROOT_TRAILER_SIZE;
@@ -117,6 +121,24 @@ class Root
     {
         *((long long *) &ts) = htobe64(*((long long *) &ts));
         ::memcpy(buffer_ + ROOT_TIMESTAMP_OFFSET, &ts, ROOT_TIMESTAMP_SIZE);
+    }
+
+    //设定block数目
+    inline void setCnt(unsigned int cnt)
+    {
+        cnt = htobe32(cnt);
+        ::memcpy(
+            buffer_ + ROOT_BLOCKCNT_OFFSET, &cnt, ROOT_BLOCKCNT_SIZE);
+    }
+
+    //获取block数目
+    inline unsigned int getCnt()
+    {
+        unsigned int cnt;
+        ::memcpy(
+            &cnt, buffer_ + ROOT_BLOCKCNT_OFFSET, ROOT_BLOCKCNT_SIZE);
+        cnt = be32toh(cnt);
+        return cnt;
     }
 
     // 获取block链头
@@ -424,7 +446,7 @@ class DataBlock : public Block
 
   public:
     void clear(unsigned int blockid);
-     // 获得记录个数
+    // 获得记录个数
     inline unsigned int getRowCount()
     {
         unsigned int count;

@@ -24,44 +24,120 @@ namespace db {
 // 表操作接口
 //
 
+//比较
+struct Compare;
+
+//表
 class Table
 {
   public:
-    friend struct Compare;
+    //迭代器
+    struct iterator;
+    // 表的迭代器
+    struct blockIter;
 
   public:
-    // 表的迭代器
-    struct iterator
+    //友元类声明
+    friend struct Compare;
+    friend struct iterator;
+    friend struct blockIter;
+
+  public:
+    struct blockIter
     {
       private:
         unsigned int blockid; // block位置
-        unsigned short sloti; // slots[]索引
         Table &table;
+        DataBlock block;
+
+      public:
+        friend struct iterator;
+
+      public:
+        blockIter(unsigned int bid, Table &itable)
+            : blockid(bid)
+            , table(itable)
+        {}
+        blockIter(const blockIter &o)
+            : blockid(o.blockid)
+            , table(o.table)
+        {}
+        ~blockIter() {}
+        unsigned int getBlockid() { return blockid; }
+        blockIter &operator=(const blockIter &o)
+        {
+            blockid = o.blockid;
+            table = o.table;
+            return *this;
+        }
+        blockIter &operator++() // 前缀
+        {
+            size_t offset = (blockid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
+            table.relationInfo->file.read(
+                offset, (char *) table.buffer_, Block::BLOCK_SIZE);
+            if (blockid!=-1) blockid=block.getNextid();
+            return *this;
+        }
+        blockIter operator++(int) // 后缀
+        {
+            blockIter tmp(*this);
+            operator++();
+            return tmp;
+        }
+        bool operator==(const blockIter &rhs) const
+        {
+            return blockid == rhs.blockid;
+        }
+        bool operator!=(const blockIter &rhs) const
+        {
+            return blockid != rhs.blockid;
+        }
+        DataBlock &operator*()
+        {
+            size_t offset = (blockid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
+            table.relationInfo->file.read(
+                offset, (char *) table.buffer_, Block::BLOCK_SIZE);
+            block.attach(table.buffer_);
+            return block;
+        }
+    };
+    struct iterator
+    {
+      private:
+        unsigned short sloti; // slots[]索引
+        unsigned short slotmax;
+        // Table &table;
+        blockIter &blockit;
         Record record;
 
       public:
-        iterator(unsigned int bid, unsigned short si, Table &itable)
-            : blockid(bid)
-            , sloti{si}
-            , table(itable) //?赋值构造
-        {}
+        iterator(unsigned short si, blockIter &iblockit)
+            : sloti{si}
+            , blockit(iblockit)
+        {
+            slotmax = (*blockit).getSlotsNum() - 1;
+        }
         iterator(const iterator &o)
-            : blockid(o.blockid)
-            , sloti(o.sloti)
-            , table(o.table)
+            : sloti(o.sloti)
+            , blockit(o.blockit)
+            , slotmax(o.slotmax)
         {}
         iterator &operator=(const iterator &o)
         {
-            blockid = o.blockid;
-            sloti = o.blockid;
-            table = o.table;
+            sloti = o.sloti;
+            blockit = o.blockit;
+            slotmax = o.slotmax;
             return *this;
         }
         iterator &operator++() // 前缀
         {
-            DataBlock block;
-            block.attach(table.buffer_);
-            if (sloti < block.getSlotsNum()) sloti++;
+            if (sloti <= slotmax)
+                sloti++;
+            else {
+                ++blockit;
+                slotmax = (*blockit).getSlotsNum() - 1;
+                sloti = 0;
+            }
             return *this;
         }
         iterator operator++(int) // 后缀
@@ -72,26 +148,22 @@ class Table
         }
         bool operator==(const iterator &rhs) const
         {
-            return blockid == rhs.blockid && sloti == rhs.sloti;
+            return sloti == rhs.sloti && blockit.blockid == rhs.blockit.blockid;
         }
         bool operator!=(const iterator &rhs) const
         {
-            return blockid != rhs.blockid || sloti != rhs.sloti;
+            return sloti != rhs.sloti || blockit.blockid != rhs.blockit.blockid;
         }
-        unsigned short slotid() { return sloti; }
+        unsigned short getSlotid() { return sloti; }
         Record &operator*()
         {
-            DataBlock block;
-            block.attach(table.buffer_);
+            DataBlock block = *blockit;
             unsigned short length = block.getFreeLength();
             unsigned short reoff = block.getSlot(sloti);
-            record.attach(table.buffer_ + reoff, length);
+            record.attach(blockit.table.buffer_ + reoff, length);
             return record;
         }
     };
-
-  public:
-    using TableSpace = std::map<std::string, RelationInfo>;
 
   public:
     Table();
@@ -108,6 +180,8 @@ class Table
     int destroy(const char *name);
     //初始化，读第1个block
     int initial();
+    //创建新datablock
+    int creatDataBlock(int blockid);
     //读下一个block
     int openNextBlock();  //若不存在，则创建
     int openNextBlockE(); //若不存在，则返回错误
@@ -120,21 +194,24 @@ class Table
     //删除一条记录
     int remove(struct iovec keyField);
     //更新一条记录
-    int update(struct iovec keyField,const unsigned char *header, struct iovec *record, int iovcnt);
-
+    int update(
+        struct iovec keyField,
+        const unsigned char *header,
+        struct iovec *record,
+        int iovcnt);
+    //写root
+    int writeRoot();
+    // block begin、end
+    blockIter blockBegin() { return blockIter(1, *this); }
+    blockIter blockEnd() { return blockIter(-1, *this); }
     // begin, end
-    iterator begin()
-    {
-        DataBlock block;
-        block.attach(buffer_);
-        return iterator(block.blockid(), 0, *this);
-    }
+    iterator begin() { return iterator(0, blockBegin()); }
     iterator end()
     {
         DataBlock block;
         block.attach(buffer_);
         unsigned short slotsnum = block.getSlotsNum();
-        return iterator(block.blockid(), slotsnum, *this);
+        return iterator(slotsnum, blockEnd());
     }
 
     // front,back
@@ -147,10 +224,11 @@ class Table
         DataBlock block;
         block.attach(buffer_);
         unsigned short slotsnum = block.getSlotsNum();
-        return iterator(block.blockid(), slotsnum - 1, *this);
+        return iterator(slotsnum - 1, blockEnd());
     }
-    Schema::TableSpace::iterator it; //表信息，map迭代器
-    unsigned char *buffer_;          // block，TODO: 缓冲模块
+    unsigned int DataBlockCnt;  // datablock数目
+    RelationInfo *relationInfo; //表信息
+    unsigned char *buffer_;     // block，TODO: 缓冲模块
 };
 struct Compare
 {
