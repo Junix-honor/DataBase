@@ -14,20 +14,20 @@ namespace db {
 // TODO: 加上log
 std::pair<size_t, size_t> Record::size(const iovec *iov, int iovcnt)
 {
-    size_t s1 = 0, s2 = 0;
-
+    size_t iovoff = 1; // iov偏移量
+    size_t tot = 0;    //总长度
+    size_t head = 0;   // head位置
     Integer it;
-    for (int i = 0; i < iovcnt; ++i) {
-        it.set(iov[i].iov_len);
-        s1 += it.size() + iov[i].iov_len;
-        s2 += it.size();
+    for (int i = 0; i < iovcnt; i++) {
+        it.set(iovoff);
+        head += it.size();
+        iovoff += iov[i].iov_len;
     }
-    s1 += HEADER_SIZE; // header
-    it.set(s1);
-    s1 += it.size(); // 整个记录长度
-    s2 += it.size(); // header偏移量
-
-    return std::pair<size_t, size_t>(s1, s2);
+    tot = head + iovoff;
+    it.set(tot);
+    tot += it.size();
+    head += it.size();
+    return std::pair<size_t, size_t>(tot, head);
 }
 
 size_t Record::set(const iovec *iov, int iovcnt, const unsigned char *header)
@@ -252,13 +252,12 @@ bool Record::specialRef(iovec &iov, unsigned int id)
     size_t fieldNum = fields();
     struct iovec *iove = (struct iovec *) malloc(sizeof(iovec) * fieldNum);
     unsigned char header;
-    int ret = ref(iove, (int)fieldNum, &header);
+    int ret = ref(iove, (int) fieldNum, &header);
     if (ret) {
-        iov=iove[id];
+        iov = iove[id];
         free(iove);
         return true;
-    } else
-    {
+    } else {
         free(iove);
         return false;
     }

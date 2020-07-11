@@ -75,7 +75,8 @@ class Table
             size_t offset = (blockid - 1) * Block::BLOCK_SIZE + Root::ROOT_SIZE;
             table.relationInfo->file.read(
                 offset, (char *) table.buffer_, Block::BLOCK_SIZE);
-            if (blockid!=-1) blockid=block.getNextid();
+            block.attach(table.buffer_);
+            if (blockid != -1) blockid = block.getNextid();
             return *this;
         }
         blockIter operator++(int) // 后缀
@@ -133,11 +134,6 @@ class Table
         {
             if (sloti <= slotmax)
                 sloti++;
-            else {
-                ++blockit;
-                slotmax = (*blockit).getSlotsNum() - 1;
-                sloti = 0;
-            }
             return *this;
         }
         iterator operator++(int) // 后缀
@@ -158,9 +154,13 @@ class Table
         Record &operator*()
         {
             DataBlock block = *blockit;
-            unsigned short length = block.getFreeLength();
+
+            // while (block.getSlotsNum() == 0) {
+            //     ++blockit;
+            //     block = *blockit;
+            // }
             unsigned short reoff = block.getSlot(sloti);
-            record.attach(blockit.table.buffer_ + reoff, length);
+            record.attach(blockit.table.buffer_ + reoff, Block::BLOCK_SIZE);
             return record;
         }
     };
@@ -181,14 +181,19 @@ class Table
     //初始化，读第1个block
     int initial();
     //创建新datablock
-    int creatDataBlock(int blockid);
-    //读下一个block
-    int openNextBlock();  //若不存在，则创建
-    int openNextBlockE(); //若不存在，则返回错误
-    //返回当前block的id
+    int creatDataBlock(int blockid, int &newid);
+    //分裂datablock
+    int splitDataBlock(int blockid);
+    //!返回当前block的id,测试需要
     int blockid();
+    //!返回当前block的空闲空间,测试需要
+    unsigned short freelength();
+    //!返回当前block的slotsNum,测试需要
+    unsigned short slotsNum();
     //写block
     int writeBlock();
+    //更新root
+    int writeRoot();
     // 插入一条记录
     int insert(const unsigned char *header, struct iovec *record, int iovcnt);
     //删除一条记录
@@ -199,32 +204,34 @@ class Table
         const unsigned char *header,
         struct iovec *record,
         int iovcnt);
-    //写root
-    int writeRoot();
     // block begin、end
-    blockIter blockBegin() { return blockIter(1, *this); }
+    blockIter blockBegin()
+    {
+        relationInfo->file.read(0, (char *) buffer_, Root::ROOT_SIZE);
+        Root root;
+        root.attach(buffer_);
+        return blockIter(root.getHead(), *this);
+    }
     blockIter blockEnd() { return blockIter(-1, *this); }
     // begin, end
-    iterator begin() { return iterator(0, blockBegin()); }
-    iterator end()
+    iterator begin(blockIter &blockIt) { return iterator(0, blockIt); }
+    iterator end(blockIter &blockIt)
     {
-        DataBlock block;
-        block.attach(buffer_);
+        DataBlock block = *blockIt;
         unsigned short slotsnum = block.getSlotsNum();
-        return iterator(slotsnum, blockEnd());
+        return iterator(slotsnum, blockIt);
     }
 
     // front,back
-    Record &front() { return *begin(); }
-    Record &back() { return *last(); }
+    Record &front(blockIter &blockIt) { return *begin(blockIt); }
+    Record &back(blockIter &blockIt) { return *last(blockIt); }
 
   private:
-    iterator last()
+    iterator last(blockIter &blockIt)
     {
-        DataBlock block;
-        block.attach(buffer_);
+        DataBlock block = *blockIt;
         unsigned short slotsnum = block.getSlotsNum();
-        return iterator(slotsnum - 1, blockEnd());
+        return iterator(slotsnum - 1, blockIt);
     }
     unsigned int DataBlockCnt;  // datablock数目
     RelationInfo *relationInfo; //表信息

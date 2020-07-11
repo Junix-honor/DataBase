@@ -438,7 +438,7 @@ class DataBlock : public Block
   public:
     static const int DATA_ROWS_OFFSET =
         BLOCK_FREESPACE_OFFSET + BLOCK_FREESPACE_SIZE; // 记录个数偏移量
-    static const int DATA_ROWS_SIZE = 4;               // 表个数大小4B
+    static const int DATA_ROWS_SIZE = 4;               // 记录个数大小4B
     static const short DATA_DEFAULT_FREESPACE =
         DATA_ROWS_OFFSET + DATA_ROWS_SIZE; // 空闲空间缺省偏移量
     static const int BLOCK_DATA_START =

@@ -91,6 +91,8 @@ void DataBlock::clear(unsigned int blockid)
     // 设置freespace
     unsigned short data = htobe16(DATA_DEFAULT_FREESPACE);
     ::memcpy(buffer_ + BLOCK_FREESPACE_OFFSET, &data, BLOCK_FREESPACE_SIZE);
+    //设定slots[]数目
+    setSlotsNum(0);
     // 设定类型
     setType(BLOCK_TYPE_META);
     // 设置checksum

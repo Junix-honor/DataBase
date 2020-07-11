@@ -8,6 +8,7 @@
 //
 #include "../catch.hpp"
 #include <db/table.h>
+#include <iostream>
 using namespace db;
 
 TEST_CASE("db/table.h")
@@ -51,101 +52,105 @@ TEST_CASE("db/table.h")
     {
         Table table;
         int ret = table.open("tablee");
-        table.initial();
         REQUIRE(ret == S_OK);
-        ret = table.openNextBlock();
+        ret = table.initial();
         REQUIRE(ret == S_OK);
-        REQUIRE(table.blockid() == 2);
         table.close("tablee.dat");
     }
     SECTION("insert")
     {
         Table table;
         int ret = table.open("tablee");
-
-        struct iovec iov[3];
-        long long id = 3;
-        iov[0].iov_base = &id;
-        iov[0].iov_len = sizeof(long long);
-        char *phone = "13534500702";
-        iov[1].iov_base = (void *) phone;
-        iov[1].iov_len = strlen(phone) + 1;
-        char *name = "Junix";
-        iov[2].iov_base = (void *) name;
-        iov[2].iov_len = strlen(name) + 1;
-        unsigned char header = 0x84;
-        ret = table.insert(&header, iov, 3);
         REQUIRE(ret == S_OK);
-
-        id = 1;
-        iov[0].iov_base = &id;
-        iov[0].iov_len = sizeof(long long);
-        phone = "19983485155";
-        iov[1].iov_base = (void *) phone;
-        iov[1].iov_len = strlen(phone) + 1;
-        name = "Honor";
-        iov[2].iov_base = (void *) name;
-        iov[2].iov_len = strlen(name) + 1;
-        header = 0x84;
-        ret = table.insert(&header, iov, 3);
+        ret = table.initial();
         REQUIRE(ret == S_OK);
+        std::cout << "freelength:" << table.freelength() << std::endl;
+        std::cout << "slotsNum:" << table.slotsNum() << std::endl;
+        for (int i = 10000; i > 0; i--) {
+            struct iovec iov[3];
+            long long id = i;
+            iov[0].iov_base = &id;
+            iov[0].iov_len = sizeof(long long);
+            char *phone = "13534500702";
+            iov[1].iov_base = (void *) phone;
+            iov[1].iov_len = strlen(phone) + 1;
+            char *name =
+                "JunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixx"
+                "xxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJuni"
+                "xxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJuni"
+                "xxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJunixxxxJun"
+                "i";
+            iov[2].iov_base = (void *) name;
+            iov[2].iov_len = strlen(name) + 1;
+            unsigned char header = 0x84;
+            ret = table.insert(&header, iov, 3);
+            REQUIRE(ret == S_OK);
+            std::cout << "freelength:" << table.freelength() << std::endl;
+            std::cout << "slotsNum:" << table.slotsNum() << std::endl;
+            std::cout << "insert:" << i << std::endl;
+        }
 
-        Table::iterator it = table.begin();
-        Record record = *it;
-        iovec keyField;
-        record.specialRef(keyField, 0);
-        long long *keyFieldPointer = (long long *) keyField.iov_base;
-        REQUIRE(*keyFieldPointer == 1);
+        long long cnt = 1;
+        for (auto it1 = table.blockBegin(); it1 != table.blockEnd(); ++it1) {
+            for (auto it2 = table.begin(it1); it2 != table.end(it1); ++it2) {
+                Record record = *it2;
+                iovec keyField;
+                iovec Field;
 
-        table.close("tablee.dat");
-    }
-    SECTION("iterator")
-    {
-        Table table;
-        int ret = table.open("tablee");
-        table.initial();
-        REQUIRE(ret == S_OK);
-        /* Table::iterator it1 = table.begin();
-        REQUIRE(it1 != table.end());
-        REQUIRE(++it1 == table.end());
-        Table::iterator it2 = table.begin();
-        REQUIRE(it2++ == table.begin());
-        REQUIRE(it2 == table.end()); */
+                record.specialRef(keyField, 0);
+                long long *keyFieldPointer = (long long *) keyField.iov_base;
+                REQUIRE(*keyFieldPointer == cnt++);
 
-        Table::iterator it = table.begin();
-        Record record = *it;
-        REQUIRE(record.fields() == 3);
+                record.specialRef(Field, 1);
+                char *FieldPointer = (char *) Field.iov_base;
+                char *phone = "13534500702";
+                REQUIRE(
+                    strncmp(FieldPointer, phone, strlen(FieldPointer)) == 0);
+            }
+        }
         table.close("tablee.dat");
     }
     SECTION("remove")
     {
-        iovec field;
-        long long id = 1;
-        field.iov_base = &id;
-        field.iov_len = sizeof(long long);
-
         Table table;
         int ret = table.open("tablee");
-        ret = table.remove(field);
         REQUIRE(ret == S_OK);
+        ret = table.initial();
+        REQUIRE(ret == S_OK);
+        for (long long i = 1; i < 10000; i++) {
+            iovec field;
+            long long id = i;
+            field.iov_base = &id;
+            field.iov_len = sizeof(long long);
 
-        Table::iterator it = table.begin();
-        Record record = *it;
-        iovec Field;
-        record.specialRef(Field, 0);
-        long long *keyFieldPointer = (long long *) Field.iov_base;
-        REQUIRE(*keyFieldPointer == 3);
+            ret = table.remove(field);
+            REQUIRE(ret == S_OK);
 
-        record.specialRef(Field, 1);
-        char *FieldPointer = (char *) Field.iov_base;
-        char *phone = "13534500702";
-        REQUIRE(strncmp(FieldPointer, phone, strlen(FieldPointer)) == 0);
+            auto bit = table.blockBegin();
+            DataBlock block = *bit;
+            while (block.getSlotsNum() == 0) {
+                ++bit;
+                block = *bit;
+            }
+            auto it = table.begin(bit);
+            Record record = *it;
+            iovec Field;
+            record.specialRef(Field, 0);
+            long long *keyFieldPointer = (long long *) Field.iov_base;
+            REQUIRE(*keyFieldPointer == i + 1);
+
+            record.specialRef(Field, 1);
+            char *FieldPointer = (char *) Field.iov_base;
+            char *phone = "13534500702";
+            REQUIRE(strncmp(FieldPointer, phone, strlen(FieldPointer)) == 0);
+            std::cout << "remove:" << i << std::endl;
+        }
         table.close("tablee.dat");
     }
     SECTION("updata")
     {
         iovec field;
-        long long keyid = 3;
+        long long keyid = 10000;
         field.iov_base = &keyid;
         field.iov_len = sizeof(long long);
 
@@ -163,9 +168,22 @@ TEST_CASE("db/table.h")
 
         Table table;
         int ret = table.open("tablee");
-        ret = table.update(field,&header,iov,3);
+        REQUIRE(ret == S_OK);
+        ret = table.initial();
+        REQUIRE(ret == S_OK);
 
-        Table::iterator it = table.begin();
+        ret = table.update(field, &header, iov, 3);
+        REQUIRE(ret == S_OK);
+
+        //迭代器开始
+        auto bit = table.blockBegin();
+        DataBlock block = *bit;
+        while (block.getSlotsNum() == 0) {
+            ++bit;
+            block = *bit;
+        }
+        auto it = table.begin(bit);
+
         Record record = *it;
         iovec Field;
         record.specialRef(Field, 0);
