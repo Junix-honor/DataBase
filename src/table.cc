@@ -3,8 +3,7 @@
 // @brief
 // 实现存储管理
 //
-// @author niexw
-// @email niexiaowen@uestc.edu.cn
+// @author junix
 //
 #include <db/table.h>
 namespace db {

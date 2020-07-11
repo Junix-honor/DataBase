@@ -3,9 +3,9 @@
 // @brief
 // 实现block
 //
-// @author niexw
-// @email niexiaowen@uestc.edu.cn
+// @author niexw、junix
 //
+
 #include <db/block.h>
 #include <db/record.h>
 #include <db/block.h>
